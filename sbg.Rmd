@@ -1,0 +1,157 @@
+---
+title: "SBG Analysis"
+output: html_notebook
+---
+
+```{r}
+library(tidyverse)
+library(janitor)
+library(lubridate)
+library(corrr)
+```
+
+```{r}
+data <- data%>%clean_names()
+```
+```{r}
+data <- data%>%rename(last_visit = when_was_the_last_time_you_have_visited_the_singapore_botanic_gardens,frequency_visit = how_often_do_you_normally_visit_this_place,length_visit = how_long_do_you_plan_to_stay_here_today,reason_visit = what_is_your_reason_for_visiting_the_singapore_botanic_gardens_today,company_visit = who_are_you_here_with_today,transportation_mode = how_did_you_get_here_today,like = what_do_you_like_about_this_place,dislike = what_do_you_not_like_about_this_place,change = if_you_could_change_or_add_something_to_the_park_what_would_that_be,satisfaction_layout = i_am_satisfied_with_the_layout_of_the_singapore_botanical_gardens,satisfaction_wayfinding = it_is_easy_to_find_my_way_around_the_gardens,satisfaction_access = it_is_easy_to_get_to_the_gardens,satisfaction_florafauna = i_am_satisfied_with_the_overall_flora_and_fauna_of_the_gardens,satisfaction_food_variety = there_is_a_variety_of_food_available_at_the_gardens,satisfaction_food_affordability = the_food_available_at_the_gardens_is_affordable,satisfaction_crowdedness = the_garden_is_crowded,satisfaction_seating = seating_areas_are_available_e_g_benches_and_chairs_across_the_gardens,satisfaction_shelter = sheltered_areas_area_available_across_the_gardens,satisfaction_activities = there_are_many_different_activities_to_do_within_the_gardens,satisfaction_safety = i_feel_safe_within_the_gardens,age = what_is_your_age,gender = what_gender_do_you_identify_as,neighbourhood = what_neighbourhood_do_you_live_in,accessible_green_space = are_there_enough_easily_accessible_green_areas_in_the_city,free_share = last_one_is_there_anything_else_you_would_like_to_share_about_the_singapore_botanic_gardens_something_you_absolutely_love_or_hate_about_this_park,park_section = internal_what_section_of_the_park_was_this_survey_taken_in,interviewer = internal_what_is_your_interviewer_name,interviewer_remarks = internal_any_other_remarks_you_have_as_an_interviewer_for_this_particular_survey)
+```
+```{r}
+data <- data%>%slice(-1)%>%filter(!str_detect(interviewer, "Test"))
+```
+```{r}
+data <- data%>%mutate(interviewer =recode(interviewer,`Kendrick Goh`= "Kendrick",`Ka kui`= "Ka Kui"))%>%filter(interviewer!="Mister")
+```
+```{r}
+data <- data%>%mutate(submitted_at =with_tz(submitted_at, "Singapore"))
+```
+```{r}
+visit_levels <-c("Less than a week ago", "Within the last month", "Within the last year", "Longer than a year ago", "This is my first time")
+data <- data%>%
+  mutate(last_visit =parse_factor(last_visit, levels = visit_levels, ordered = T))
+```
+```{r}
+freq_levels <-c("More than once a week", "Once a week", "1-3 times a month", "Less than every month")
+data <- data%>%
+  mutate(frequency_visit =parse_factor(frequency_visit, levels = freq_levels, ordered = T))
+```
+```{r}
+data <- data%>%rownames_to_column("id")
+```
+```{r}
+transport_data <- data %>%
+  separate_rows(transportation_mode, sep=", ")%>%
+  group_by(id)%>%
+  count(transportation_mode)%>%
+  spread(transportation_mode, n, fill = 0)%>%
+  select(-V1)%>%
+  rename_at(2:11,funs(paste0("transport_", .)))%>%
+  right_join(data)%>%
+  select(-transportation_mode)
+```
+
+At least 3 additional tables/graphs for assignment
+```{r}
+data %>% 
+  separate_rows(transportation_mode, sep=", ")%>% 
+ select(transportation_mode,age,park_section) %>% 
+  group_by(park_section, transportation_mode) %>% 
+  summarise(mean_age = mean(age) , sd_age = sd(age) , count = n())%>% 
+  ungroup() %>% 
+  slice(-1) %>% 
+  filter(park_section != "NA") %>% 
+  filter(transportation_mode!= "Grab", transportation_mode!="Lorry", transportation_mode != "Motorbike") %>% 
+  mutate(transportation_mode = recode(transportation_mode, `Bicycle/Personal mobility device` = "Bicycle/PMD"))%>% 
+  ggplot() + geom_point(mapping = aes(x = transportation_mode,  y = mean_age, color = park_section)) + geom_errorbar(aes(x=transportation_mode, ymin=mean_age-sd_age, ymax = mean_age+sd_age, color = park_section))
+```
+This graph was chosen to see how ages differ between different modes of transport.
+Grab, lorry and motorbike transport have been filtered out as there was only 1 entry per mode.
+MRT is preferred over bus for young people, possibly due to circle line being relatively new thus older folks are more inclined to stick to traditional means of reaching SBG by bus. Also, since cars and taxi are less affordable for younger patrons, the mean age tends to be high. Lastly, it is surprising to see that patrons who reach on foot are of higher age, possibly to get much needed exercise along the way. Generally S section is higher age, except for by bus.
+Error bars show the spread, using sd for the bar sizes. It shows that upper bounds for car and taxi are quite high and thus ages are really high for these two, while for MRT it is quite consistent that it is for younger visitors. In general error bars are large so there is no fixed age groups across different modes.
+
+
+```{r}
+data %>% 
+  group_by(park_section) %>% 
+  
+  select(-id,-last_visit,-frequency_visit,-length_visit,-reason_visit,-company_visit,-transportation_mode,-like,-dislike,-change,-gender,-neighbourhood,-free_share,-interviewer,-interviewer_remarks,-accessible_green_space,-submitted_at) %>% 
+  summarise_all(mean, na.rm =T) %>% 
+filter(park_section != "NA")
+```
+Simple table that compares satisfaction levels as well as ages of visitors who visit N and S section. It appears that the S section is better in terms of find seats and shelter(>0.45 difference), while other aspects are about the same. Age was quite significant, with younger crowds in the North, possibly due to different attractions in SBG.
+
+
+
+
+
+Prepare data for corr plot
+```{r}
+length_levels <- c("< 15 minutes","15 - 30 minutes","30 minutes to an hour
+","> 1 hour")
+data <- data %>%
+  mutate(length_visit = parse_factor(length_visit, levels = length_levels, ordered = T))
+```
+Prepare data for corr for whole park, N and S sections. The idea is to compare correlations between different sections and whole park, to see if there is any difference. 
+```{r}
+precorr <- data %>% 
+  mutate(last_visit = as.numeric(last_visit),frequency_visit = as.numeric(frequency_visit),length_visit = as.numeric(length_visit)) %>% 
+  select(last_visit,frequency_visit,length_visit,satisfaction_layout,satisfaction_wayfinding,satisfaction_access,satisfaction_florafauna,satisfaction_food_variety,satisfaction_food_affordability,satisfaction_crowdedness,satisfaction_seating,satisfaction_shelter,satisfaction_activities,satisfaction_safety,age)  
+  
+precorrN <- data %>% 
+  mutate(last_visit = as.numeric(last_visit),frequency_visit = as.numeric(frequency_visit),length_visit = as.numeric(length_visit)) %>% filter(park_section == "Northern (nearest to Botanic Gardens MRT)") %>% 
+  select(last_visit,frequency_visit,length_visit,satisfaction_layout,satisfaction_wayfinding,satisfaction_access,satisfaction_florafauna,satisfaction_food_variety,satisfaction_food_affordability,satisfaction_crowdedness,satisfaction_seating,satisfaction_shelter,satisfaction_activities,satisfaction_safety,age) 
+
+precorrS <- data %>% 
+  mutate(last_visit = as.numeric(last_visit),frequency_visit = as.numeric(frequency_visit),length_visit = as.numeric(length_visit)) %>% filter(park_section == "Southern (nearest to Gleneagles Hospital)") %>% 
+  select(last_visit,frequency_visit,length_visit,satisfaction_layout,satisfaction_wayfinding,satisfaction_access,satisfaction_florafauna,satisfaction_food_variety,satisfaction_food_affordability,satisfaction_crowdedness,satisfaction_seating,satisfaction_shelter,satisfaction_activities,satisfaction_safety,age)
+```
+
+Clean up column names for better presentation
+```{r}
+colnames(precorr)<-sub("satisfaction_","",colnames(precorr))
+colnames(precorrN)<-sub("satisfaction_","",colnames(precorrN))
+colnames(precorrS)<-sub("satisfaction_","",colnames(precorrS))
+```
+
+
+```{r}
+precorrN %>% 
+
+  correlate() %>%
+rearrange() %>%
+shave %>% 
+  rplot(print_cor = T)
+```
+
+As expected, frequency and last visit are strongly correlated. Interestingly, seating and shelter are also positively correlated, since they are usually found together. Wayfinding and length of visit are positively correlated, thus ease of wayfinding affects how long visitors will stay. Food variety and affordability are strongly positively correlated(0.80), i.e. more variety makes food affordable since there is a greater supply, satisfying basic economic principles. Ease of access is positively correlated to flora/fauna, suggesting it takes more than flora and fauna to attract visitors as ease of access is also important. 
+
+```{r}
+precorrS %>% 
+
+  correlate() %>%
+rearrange() %>%
+shave %>% 
+  rplot(print_cor = T)
+```
+In the S section, age appears to be negatively correlated to length and frequency of visit, i.e. older people are less likely to visit for long and frequently. It could be due to the S section being less accessible for older people, thus more work is needed to improve accessibility. Crowdedness and length of visit also stands out, being negatively correlated, thus more crowds will decrease time spent by individuals at SBG. It appears that layout stands out being positively correlated to several other aspects, thus layout of S section is a significant factor. 
+```{r}
+precorr %>% 
+correlate() %>%
+rearrange() %>%
+shave %>%
+rplot(print_cor = T)
+```
+Overall across both sections, the corr plot resembles the N section, with strong correlations between frequency and length, seating and shelter, food variety and affordability. This suggests that the N section is a strong representation of the SBG. It also suggests more work may be required to push the S section to the same level as N section. 
+
+
+```{r}
+data %>% 
+  filter(gender!="Couple") %>% 
+  ggplot() + geom_histogram(mapping = aes(age, color= gender), binwidth = 5)
+```
+This plot shows visually the distribution of age, sorted by gender, and grouped in bins of width 5. Interestingly, male/female differences are varied, with no clear bias for different ages. Most visitors are 40 and below. 
+
+Reflections:
+In retrospect, I have had a great experience using R. Although I was apprehensive at first, having never used or even heard of R before, it is a relatively easy language to learn and use compared to general purpose languages such as C. The pros of R is that the language used is intuitive, verbs mean exactly what they do, such as "filter"" which filters out rows by criteria, and "select" which selects columns. R is flexible as any additional functions needed can be easily downloaded through install.packages and thus expanding the verb library. R notebook allows documenting exactly what was done, so that it can be presented in a comprehensible manner to others. R is more useful than MS excel, once the syntax is more or less understood by the user, as it is almost like talking to the computer and telling it what to do through the use of verbs, although beginners will likely struggle with missing pipes or brackets, thus allowing fast execution of instructions without the need to browse through menus or buttons in order to get things done. 
+The cons of R, if I must, is that not all features found in other software can be replicated in R. It may take a while to get the features uploaded to CRAN, thus there is a need to look through Github to find the feature one may desire. However, tidyverse already has many good packages included that allows one to perform tasks that most other softwares can do, but better and faster, thus I must say I am appreciating R more by the day. 
+
